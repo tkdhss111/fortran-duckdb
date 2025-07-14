@@ -117,9 +117,9 @@ contains
 
   subroutine get_cell ( this, i, j, x )
     class(duckdb_ty), intent(inout) :: this
-    integer,     intent(in)  :: i
-    integer,     intent(in)  :: j
-    class(*),    intent(out) :: x
+    integer(8),       intent(in)    :: i
+    integer(8),       intent(in)    :: j
+    class(*),         intent(out)   :: x
     select type ( y => x )
       type is ( logical )
         y = duckdb_value_boolean ( this%res, col = j - 1, row = i - 1 )

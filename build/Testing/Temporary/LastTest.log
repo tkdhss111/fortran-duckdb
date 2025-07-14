@@ -1,13 +1,13 @@
-Start testing: Jul 14 14:57 JST
+Start testing: Jul 14 15:22 JST
 ----------------------------------------------------------
 1/1 Testing: hss_test_duckdb
 1/1 Test: hss_test_duckdb
 Command: "/home/hss/0_tkd/1_hss/2_tools/fortran-duckdb/build/test/hss_test_duckdb"
 Directory: /home/hss/0_tkd/1_hss/2_tools/fortran-duckdb
-"hss_test_duckdb" start time: Jul 14 14:57 JST
+"hss_test_duckdb" start time: Jul 14 15:22 JST
 Output:
 ----------------------------------------------------------
- Test: Open database: "db.duckdb"
+ Test: Open database: "test.duckdb"
  Test: Open database
  Test: Open database with automatic mode
  Database opened as AUTOMATIC
@@ -20,28 +20,12 @@ Output:
  Database opened as AUTOMATIC
  Test: Open in-memory database with READ_WRITE mode
  Database opened as READ_WRITE
- Test: Open in-memory database with READ_ONLY mode
-ERROR STOP Impossible to open In-memory database as READ_ONLY
-
-Error termination. Backtrace:
-#0  0xdfd23a23e59 in ???
-#1  0xdfd23a24a71 in ???
-#2  0xdfd23a2610b in ???
-#3  0x5d9187f32f46 in ???
-#4  0x5d9187f33b47 in ???
-#5  0x5d9187f33bae in ???
-#6  0xdfd2362a1c9 in __libc_start_call_main
-	at ../sysdeps/nptl/libc_start_call_main.h:58
-#7  0xdfd2362a28a in __libc_start_main_impl
-	at ../csu/libc-start.c:360
-#8  0x5d9187f2c844 in ???
-#9  0xffffffffffffffff in ???
 <end of output>
-Test time =   0.24 sec
+Test time =   0.11 sec
 ----------------------------------------------------------
-Test Failed.
-"hss_test_duckdb" end time: Jul 14 14:57 JST
+Test Passed.
+"hss_test_duckdb" end time: Jul 14 15:22 JST
 "hss_test_duckdb" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Jul 14 14:57 JST
+End testing: Jul 14 15:22 JST

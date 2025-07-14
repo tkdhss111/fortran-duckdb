@@ -1,0 +1,20 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "test/CMakeFiles/hss_test_duckdb.dir/__/src/duckdb.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "test/duckdb.mod",
+					"is-interface" : true,
+					"logical-name" : "duckdb.mod"
+				}
+			],
+			"requires" : []
+		}
+	],
+	"version" : 0
+}

@@ -1,0 +1,9 @@
+ninja_dyndep_version = 1.0
+build test/CMakeFiles/hss_test_duckdb.dir/__/src/duckdb.f90.o | test/duckdb.mod: dyndep
+  restat = 1
+
+build test/CMakeFiles/hss_test_duckdb.dir/__/src/duckdb_mo.f90.o | test/duckdb_mo.mod: dyndep | test/duckdb.mod
+  restat = 1
+
+build test/CMakeFiles/hss_test_duckdb.dir/01_unit_test_open_close.f90.o: dyndep | test/duckdb_mo.mod
+

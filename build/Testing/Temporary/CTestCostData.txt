@@ -1,0 +1,3 @@
+hss_test_duckdb 0 0
+---
+hss_test_duckdb

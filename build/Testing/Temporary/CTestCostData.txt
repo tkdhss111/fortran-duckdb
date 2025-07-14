@@ -1,2 +1,0 @@
-hss_test_duckdb 2 0.0549511
----

@@ -1,5 +1,8 @@
 MKFILE:=-C ../ -f makefile
 
+git:
+	make git $(MKFILE)
+
 release:
 	make release $(MKFILE)
 

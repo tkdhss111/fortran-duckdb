@@ -4,11 +4,6 @@ NINJA       := ninja
 MKDIR       := mkdir -p
 MKDIR_BUILD := $(MKDIR) build && cd build
 
-git:
-	git add . && \
-	git commit -m "$(shell hostname)" && \
-	git push
-
 .PHONY: test install
 
 test: 
@@ -25,3 +20,8 @@ install:
 
 uninstall:
 	cd build && xargs rm < install_manifest.txt
+
+git:
+	git add . && \
+	git commit -m "$(shell hostname)" && \
+	git push

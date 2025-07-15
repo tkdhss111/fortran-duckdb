@@ -44,4 +44,8 @@ program unit_test_open_close
   !call db%open ( '', 'READ_ONLY' )
   !call db%close
 
+  print *, 'Test: Open actual database'
+  call db%open ( '/mnt/01_TAKEDATA/tkd-09-weighted-weather/04_Chubu/wthr_wgt.duckdb' )
+  call db%close
+
 end program

@@ -1,3 +1,6 @@
+!
+! Modified by tkdhss111 @date 2025-07-14
+!
 module duckdb
   use, intrinsic :: iso_fortran_env
   use, intrinsic :: iso_c_binding
@@ -2670,6 +2673,7 @@ module duckdb
         sz = c_strlen(c_str)
         if (sz < 0) return
         call c_f_pointer(c_str, ptrs, [ sz ])
+        if ( allocated ( f_str ) ) deallocate ( f_str ) ! added by tkdhss111
         allocate (character(len=sz) :: f_str)
         f_str = copy(ptrs)
     end subroutine c_f_str_ptr

@@ -40,17 +40,22 @@ contains
       access_ = 'AUTOMATIC'
     end if
     if ( duckdb_create_config ( this%cf ) == duckdberror ) then
+      print *, 'Database: '//trim(path)
       error stop '*** Error: Cound not create database config'
     end if
     if ( duckdb_set_config ( this%cf, 'access_mode', access_ ) == duckdberror ) then
       call duckdb_destroy_config ( this%cf  )
+      print *, 'Database: '//trim(path)
       error stop '*** Error: Cound not set access_mode as '//trim(access_)
     end if
     if ( duckdb_open_ext ( path, this%db, this%cf, this%errmsg ) == duckdberror ) then
-      error stop trim(this%errmsg)
+      call duckdb_destroy_config ( this%cf  )
+      print *, 'Database: '//trim(path)
+      error stop '*** Error: Cound not open database ('//trim(this%errmsg)//')'
     end if
     if ( duckdb_connect ( this%db, this%con ) == duckdberror ) then
       call duckdb_close ( this%db  )
+      print *, 'Database: '//trim(path)
       error stop '*** Error: Cound not connect database'
     end if
   end subroutine open_duckdb
@@ -69,7 +74,7 @@ contains
     if ( duckdb_query ( this%con, trim(query)//";", this%res ) == duckdberror ) then
       print *, '[Query] '//trim(query)
       call this%close
-      error stop '*** '//trim(duckdb_result_error ( this%res ))
+      error stop '*** Error: Could not send query ('//trim(duckdb_result_error ( this%res )//')' )
     end if
   end subroutine send_query
 
@@ -79,7 +84,7 @@ contains
   end subroutine clear_result
 
   function concat ( i, sep ) result ( p )
-    integer,      intent(in) :: i
+    integer(8),   intent(in) :: i
     character(*), intent(in) :: sep
     character(:), allocatable :: p
     if ( i == 1 ) then
@@ -93,9 +98,9 @@ contains
     class(duckdb_ty),       intent(inout) :: this
     character(*),           intent(in)    :: table
     character(*), optional, intent(in)    :: cols(:)
-    integer,      optional, intent(out)   :: nrows, ncols
+    integer(8),   optional, intent(out)   :: nrows, ncols
     character(:), allocatable             :: colnames
-    integer i
+    integer(8) i
     if ( present ( cols ) ) then
       colnames = ''
       do i = 1, size(cols)
@@ -117,8 +122,7 @@ contains
 
   subroutine get_cell ( this, i, j, x )
     class(duckdb_ty), intent(inout) :: this
-    integer(8),       intent(in)    :: i
-    integer(8),       intent(in)    :: j
+    integer(8),       intent(in)    :: i, j
     class(*),         intent(out)   :: x
     select type ( y => x )
       type is ( logical )
@@ -137,6 +141,7 @@ contains
         call this%close
         error stop '*** Error: Unknown variable type'
     end select
+
   end subroutine get_cell
 
   subroutine export_table_as_parquet ( this, table, to )

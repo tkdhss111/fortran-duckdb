@@ -3309,7 +3309,7 @@ module duckdb
     function duckdb_bind_blob(ps, idx, blob) result(res)
       integer(kind(duckdb_state)) :: res
       type(duckdb_prepared_statement) :: ps
-      integer :: idx, length
+      integer :: idx
       type(duckdb_blob) :: blob
       res = duckdb_bind_blob_(ps, int(idx, kind=c_int64_t), blob%data, &
       & blob%size)

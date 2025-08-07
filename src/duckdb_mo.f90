@@ -76,9 +76,10 @@ contains
       if ( print ) print *, '[Query] '//trim(query)
     end if
     if ( duckdb_query( this%con, trim(query)//";", this%res ) == duckdberror ) then
+      if ( .not. present( print ) ) write ( *, '(a)' ) '[Query] '//trim(query)
+      write ( *, '(a)' ) '[Query] '//trim(duckdb_result_error( this%res ) )
       call this%close
-      if ( .not. present( print ) ) print *, '[Query] '//trim(query)
-      error stop '*** Error: Could not send query ('//trim(duckdb_result_error( this%res )//')' )
+      error stop 1
     end if
   end subroutine send_query
 

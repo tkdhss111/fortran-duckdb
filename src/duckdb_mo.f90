@@ -73,7 +73,7 @@ contains
     character(*),      intent(in)    :: query
     logical, optional, intent(in)    :: print
     if ( present( print ) ) then
-      if ( print ) write ( *, * ) '[Query] '//trim(query)
+      if ( print ) write ( *, '(a)' ) '[Query] '//trim(query)
     end if
     this%stat = duckdb_query( this%con, trim(query)//";", this%res )
     if ( this%stat == duckdberror ) then
@@ -160,7 +160,7 @@ contains
     class(duckdb_ty), intent(inout) :: this
     character(*),     intent(in)    :: table
     character(*),     intent(in)    :: to
-    write ( *, * ) "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')"
+    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')"
     call this%send( "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')" )
     call duckdb_destroy_result( this%res )
   end subroutine export_table_as_parquet

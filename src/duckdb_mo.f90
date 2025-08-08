@@ -69,17 +69,18 @@ contains
   end subroutine close_duckdb
 
   subroutine send_query ( this, query, print )
-    class(duckdb_ty), intent(inout) :: this
-    character(*),     intent(in)    :: query
-    logical, optional               :: print
+    class(duckdb_ty),  intent(inout) :: this
+    character(*),      intent(in)    :: query
+    logical, optional, intent(in)    :: print
     if ( present( print ) ) then
-      if ( print ) print *, '[Query] '//trim(query)
+      if ( print ) write ( *, * ) '[Query] '//trim(query)
     end if
-    if ( duckdb_query( this%con, trim(query)//";", this%res ) == duckdberror ) then
+    this%stat = duckdb_query( this%con, trim(query)//";", this%res )
+    if ( this%stat == duckdberror ) then
       if ( .not. present( print ) ) write ( *, '(a)' ) '[Query] '//trim(query)
       write ( *, '(a)' ) '[Query] '//trim(duckdb_result_error( this%res ) )
       call this%close
-      error stop 1
+      return
     end if
   end subroutine send_query
 
@@ -159,7 +160,7 @@ contains
     class(duckdb_ty), intent(inout) :: this
     character(*),     intent(in)    :: table
     character(*),     intent(in)    :: to
-    print *, "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')"
+    write ( *, * ) "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')"
     call this%send( "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')" )
     call duckdb_destroy_result( this%res )
   end subroutine export_table_as_parquet

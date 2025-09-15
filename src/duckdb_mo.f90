@@ -115,7 +115,7 @@ contains
     else
       colnames = '*'
     end if
-    print *, 'SELECT '//trim(colnames)//' FROM '//trim(table)
+    ! write ( *, '(a)' ) 'SELECT '//trim(colnames)//' FROM '//trim(table)
     call this%send ( 'SELECT '//trim(colnames)//' FROM '//trim(table) )
     if ( present( nrows ) ) then
       nrows = duckdb_row_count( this%res )
@@ -123,12 +123,12 @@ contains
         print *,  '*** Error: No record found'
         this%stat = 1
       else
-        print *, 'nrows: ', nrows
+        !print *, 'nrows: ', nrows
       end if
     end if
     if ( present( ncols ) ) then
       ncols = duckdb_column_count( this%res )
-      print *, 'ncols: ', ncols
+      !print *, 'ncols: ', ncols
     end if
   end subroutine get_table
 
@@ -136,19 +136,41 @@ contains
     class(duckdb_ty), intent(inout) :: this
     integer(8),       intent(in)    :: i, j
     class(*),         intent(out)   :: x
+    logical is_null
+    is_null = duckdb_value_is_null( this%res, col = j - 1, row = i - 1 )
     select type ( y => x )
       type is ( logical )
         y = duckdb_value_boolean( this%res, col = j - 1, row = i - 1 )
       type is ( integer(4) )
-        y = duckdb_value_int32( this%res, col = j - 1, row = i - 1 )
+        if ( is_null ) then
+          y = -999
+        else
+          y = duckdb_value_int32( this%res, col = j - 1, row = i - 1 )
+        end if
       type is ( integer(8) )
-        y = duckdb_value_int64( this%res, col = j - 1, row = i - 1 )
+        if ( is_null ) then
+          y = -999
+        else
+          y = duckdb_value_int64( this%res, col = j - 1, row = i - 1 )
+        end if
       type is ( real(4) )
-        y = duckdb_value_float( this%res, col = j - 1, row = i - 1 )
+        if ( is_null ) then
+          y = -999.0
+        else
+          y = duckdb_value_float( this%res, col = j - 1, row = i - 1 )
+        end if
       type is ( real(8) )
-        y = duckdb_value_double( this%res, col = j - 1, row = i - 1 )
+        if ( is_null ) then
+          y = -999.0
+        else
+          y = duckdb_value_double( this%res, col = j - 1, row = i - 1 )
+        end if
       type is ( character(*) )
-        y = duckdb_string_to_character( duckdb_value_string( this%res, col = j - 1, row = i - 1 ) )
+        if ( is_null ) then
+          y = 'NA'
+        else
+          y = duckdb_string_to_character( duckdb_value_string( this%res, col = j - 1, row = i - 1 ) )
+        end if
       class default
         call this%close
         error stop '*** Error: Unknown variable type'
@@ -161,6 +183,7 @@ contains
     character(*),     intent(in)    :: table
     character(*),     intent(in)    :: to
     write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')"
+    call execute_command_line( 'mkdir -p '//dirname(to) )
     call this%send( "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')" )
     call duckdb_destroy_result( this%res )
   end subroutine export_table_as_parquet
@@ -169,8 +192,22 @@ contains
     class(duckdb_ty), intent(inout) :: this
     character(*),     intent(in)    :: table
     character(*),     intent(in)    :: to
+    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//trim(to)//"' (HEADER, DELIMITER ',')"
+    call execute_command_line( 'mkdir -p '//dirname(to) )
     call this%send( "COPY "//trim(table)//" TO '"//trim(to)//"' (HEADER, DELIMITER ',')" )
     call duckdb_destroy_result( this%res )
   end subroutine export_table_as_csvfile
+
+  pure function dirname ( path )
+    character(*), intent(in)  :: path
+    integer                   :: p_sep
+    character(:), allocatable :: dirname
+    p_sep = index( path, '/', back = .true. )
+    if (p_sep > 1) then
+      dirname = path(1:p_sep)
+    else
+      dirname = './'
+    end if
+  end function
 
 end module duckdb_mo

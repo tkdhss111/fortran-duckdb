@@ -1,5 +1,5 @@
-cmake_minimum_required ( VERSION 3.0 )
-set ( CMAKE_Fortran_COMPILER ifx )
+cmake_minimum_required ( VERSION 3.20 )
+set ( CMAKE_Fortran_COMPILER /opt/intel/oneapi/compiler/latest/bin/ifx )
 #set ( CMAKE_Fortran_COMPILER gfortran )
 enable_language ( Fortran )
 enable_testing ()

@@ -5,6 +5,8 @@ module duckdb_mo
 
   implicit none
 
+  private :: dirname
+
   type duckdb_ty
     type(duckdb_database)     :: db
     type(duckdb_config)       :: cf

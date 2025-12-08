@@ -155,6 +155,7 @@ contains
     class(duckdb_ty), intent(inout) :: this
     integer(8),       intent(in)    :: i, j
     class(*),         intent(out)   :: x
+    type(duckdb_string) :: str
     logical is_null
     is_null = duckdb_value_is_null( this%res, col = j - 1, row = i - 1 )
     select type ( y => x )
@@ -188,7 +189,9 @@ contains
         if ( is_null ) then
           y = 'NA'
         else
-          y = duckdb_string_to_character( duckdb_value_string( this%res, col = j - 1, row = i - 1 ) )
+          str = duckdb_value_string( this%res, col = j - 1, row = i - 1 )
+          y = duckdb_string_to_character( str )
+          if ( c_associated(str%data) ) call duckdb_free( str%data )
         end if
       class default
         call this%close
@@ -201,7 +204,9 @@ contains
     class(duckdb_ty), intent(inout) :: this
     character(*),     intent(in)    :: table
     character(*),     intent(in)    :: to
+#ifdef debug
     write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')"
+#endif
     call execute_command_line( 'mkdir -p '//dirname(to) )
     call this%send( "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')" )
     call duckdb_destroy_result( this%res )
@@ -211,7 +216,9 @@ contains
     class(duckdb_ty), intent(inout) :: this
     character(*),     intent(in)    :: table
     character(*),     intent(in)    :: to
+#ifdef debug
     write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//trim(to)//"' (HEADER, DELIMITER ',')"
+#endif
     call execute_command_line( 'mkdir -p '//dirname(to) )
     call this%send( "COPY "//trim(table)//" TO '"//trim(to)//"' (HEADER, DELIMITER ',')" )
     call duckdb_destroy_result( this%res )

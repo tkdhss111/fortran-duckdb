@@ -56,6 +56,7 @@ contains
       error stop '*** Error: Cound not open database ('//trim(this%errmsg)//')'
     end if
     if ( duckdb_connect( this%db, this%con ) == duckdberror ) then
+      call duckdb_destroy_config( this%cf )
       call duckdb_close( this%db  )
       print *, 'Database: '//trim(path)
       error stop '*** Error: Cound not connect database'
@@ -64,16 +65,32 @@ contains
 
   subroutine close_duckdb ( this )
     class(duckdb_ty), intent(inout) :: this
+
+    ! Destroy result first (may contain references to connection)
     call duckdb_destroy_result( this%res )
-    call duckdb_destroy_config( this%cf  )
-    call duckdb_disconnect    ( this%con )
-    call duckdb_close         ( this%db  )
+
+    ! Disconnect before closing database
+    call duckdb_disconnect( this%con )
+
+    ! Close database before destroying config
+    call duckdb_close( this%db )
+
+    ! Destroy config last
+    call duckdb_destroy_config( this%cf )
+
+    ! Deallocate error message if allocated  ← NEW
+    if ( allocated( this%errmsg ) ) deallocate( this%errmsg )
+
+    ! Reset status  ← NEW
+    this%stat = 0
+
   end subroutine close_duckdb
 
   subroutine send_query ( this, query, print )
     class(duckdb_ty),  intent(inout) :: this
     character(*),      intent(in)    :: query
     logical, optional, intent(in)    :: print
+    call duckdb_destroy_result( this%res )
     if ( present( print ) ) then
       if ( print ) write ( *, '(a)' ) '[Query] '//trim(query)
     end if

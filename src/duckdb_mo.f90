@@ -98,7 +98,6 @@ contains
     if ( this%stat == duckdberror ) then
       if ( .not. present( print ) ) write ( *, '(a)' ) '[Query] '//trim(query)
       write ( *, '(a)' ) '[Query] '//trim(duckdb_result_error( this%res ) )
-      call this%close
       return
     end if
   end subroutine send_query

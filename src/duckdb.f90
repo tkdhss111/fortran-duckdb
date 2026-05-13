@@ -3058,9 +3058,13 @@ module duckdb
     function duckdb_string_to_character(str) result(res)
       type(duckdb_string) :: str
       character(len=:), allocatable :: res
+      character(kind=c_char), pointer :: ptrs(:)
       res = ""
-      if (c_associated(str%data)) &
-        call c_f_str_ptr(str%data, res)
+      if (c_associated(str%data) .and. str%size > 0) then
+        call c_f_pointer(str%data, ptrs, [ str%size ])
+        allocate(character(len=str%size) :: res)
+        res = copy(ptrs)
+      end if
     end function duckdb_string_to_character
 
     ! =========================================================================

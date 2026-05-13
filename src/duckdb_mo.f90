@@ -188,9 +188,15 @@ contains
         if ( is_null ) then
           y = 'NA'
         else
-          str = duckdb_value_string( this%res, col = j - 1, row = i - 1 )
-          y = duckdb_string_to_character( str )
-          if ( c_associated(str%data) ) call duckdb_free( str%data )
+          block
+            character(:), allocatable :: tmp_str
+            tmp_str = duckdb_value_varchar( this%res, col = j - 1, row = i - 1 )
+            if ( allocated(tmp_str) ) then
+              y = tmp_str
+            else
+              y = 'NA'
+            end if
+          end block
         end if
       class default
         call this%close

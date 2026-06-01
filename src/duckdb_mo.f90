@@ -27,11 +27,15 @@ module duckdb_mo
 
 contains
 
-  subroutine open_duckdb ( this, path, access )
+  subroutine open_duckdb ( this, path, access, memory_limit, temp_directory )
     class(duckdb_ty),       intent(inout) :: this
     character(*),           intent(in)    :: path
-    character(*), optional, intent(in)    :: access ! {AUTOMATIC | READ_ONLY | READ_WRITE}
+    character(*), optional, intent(in)    :: access          ! {AUTOMATIC | READ_ONLY | READ_WRITE}
+    character(*), optional, intent(in)    :: memory_limit    ! e.g. '512MB'. Explicit arg wins; if absent, env DUCKDB_MEMORY_LIMIT; if both absent, no cap (fast local)
+    character(*), optional, intent(in)    :: temp_directory  ! e.g. '/srv/data/.duckdb_tmp'. Explicit arg wins; if absent, env DUCKDB_TEMP_DIRECTORY
     character(:), allocatable             :: access_
+    character(256)                        :: env_buf
+    character(:), allocatable             :: mem_to_apply, tmp_to_apply
     if ( present( access ) ) then
       access_ = access
       if ( access_ == 'READ_ONLY' .and. path == '' ) then
@@ -60,6 +64,31 @@ contains
       call duckdb_close( this%db  )
       print *, 'Database: '//trim(path)
       error stop '*** Error: Cound not connect database'
+    end if
+
+    ! Resolve memory_limit: explicit arg > env DUCKDB_MEMORY_LIMIT > none
+    if ( present( memory_limit ) ) then
+      if ( len_trim( memory_limit ) > 0 ) mem_to_apply = trim( memory_limit )
+    else
+      call get_environment_variable( 'DUCKDB_MEMORY_LIMIT', env_buf )
+      if ( len_trim( env_buf ) > 0 ) mem_to_apply = trim( env_buf )
+    end if
+    if ( allocated( mem_to_apply ) ) then
+      call this%send( "SET memory_limit = '"//mem_to_apply//"'" )
+      call duckdb_destroy_result( this%res )
+    end if
+
+    ! Resolve temp_directory: explicit arg > env DUCKDB_TEMP_DIRECTORY > none
+    if ( present( temp_directory ) ) then
+      if ( len_trim( temp_directory ) > 0 ) tmp_to_apply = trim( temp_directory )
+    else
+      call get_environment_variable( 'DUCKDB_TEMP_DIRECTORY', env_buf )
+      if ( len_trim( env_buf ) > 0 ) tmp_to_apply = trim( env_buf )
+    end if
+    if ( allocated( tmp_to_apply ) ) then
+      call execute_command_line( '/bin/mkdir -p '//tmp_to_apply )
+      call this%send( "SET temp_directory = '"//tmp_to_apply//"'" )
+      call duckdb_destroy_result( this%res )
     end if
   end subroutine open_duckdb
 

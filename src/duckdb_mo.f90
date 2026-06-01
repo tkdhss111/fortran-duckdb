@@ -205,28 +205,66 @@ contains
 
   end subroutine get_cell
 
-  subroutine export_table_as_parquet ( this, table, to )
-    class(duckdb_ty), intent(inout) :: this
-    character(*),     intent(in)    :: table
-    character(*),     intent(in)    :: to
+  !-----------------------------------------------------------
+  ! export_table_as_parquet
+  !
+  ! Write `table` to `to` as a parquet file.
+  !
+  !   atomic=.false. (default): write directly to `to`. Concurrent
+  !     readers may observe a partial file mid-write (DuckDB writes
+  !     the parquet footer last; readers reading metadata during
+  !     write get TProtocolException / invalid TType).
+  !
+  !   atomic=.true.: write to `to`.tmp, then `mv -f` it to `to`.
+  !     POSIX rename(2) is atomic on the same filesystem, so readers
+  !     see either the old `to` or the new one — never partial.
+  !     Use this whenever concurrent readers of `to` are possible.
+  !-----------------------------------------------------------
+  subroutine export_table_as_parquet ( this, table, to, atomic )
+    class(duckdb_ty),  intent(inout) :: this
+    character(*),      intent(in)    :: table
+    character(*),      intent(in)    :: to
+    logical, optional, intent(in)    :: atomic
+    character(:), allocatable :: target
+    logical :: do_atomic
+    do_atomic = .false.
+    if ( present(atomic) ) do_atomic = atomic
+    target = trim(to)
+    if ( do_atomic ) target = trim(to) // '.tmp'
 #ifdef debug
-    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')"
+    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//target//"' WITH(FORMAT 'parquet')"
 #endif
     call execute_command_line( 'mkdir -p '//dirname(to) )
-    call this%send( "COPY "//trim(table)//" TO '"//trim(to)//"' WITH(FORMAT 'parquet')" )
+    call this%send( "COPY "//trim(table)//" TO '"//target//"' WITH(FORMAT 'parquet')" )
     call duckdb_destroy_result( this%res )
+    if ( do_atomic ) then
+      call execute_command_line( 'mv -f -- '//target//' '//trim(to) )
+    end if
   end subroutine export_table_as_parquet
 
-  subroutine export_table_as_csvfile ( this, table, to )
-    class(duckdb_ty), intent(inout) :: this
-    character(*),     intent(in)    :: table
-    character(*),     intent(in)    :: to
+  !-----------------------------------------------------------
+  ! export_table_as_csvfile (same atomic semantics as above)
+  !-----------------------------------------------------------
+  subroutine export_table_as_csvfile ( this, table, to, atomic )
+    class(duckdb_ty),  intent(inout) :: this
+    character(*),      intent(in)    :: table
+    character(*),      intent(in)    :: to
+    logical, optional, intent(in)    :: atomic
+    character(:), allocatable :: target
+    logical :: do_atomic
+    do_atomic = .false.
+    if ( present(atomic) ) do_atomic = atomic
+    target = trim(to)
+    if ( do_atomic ) target = trim(to) // '.tmp'
 #ifdef debug
-    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//trim(to)//"' (HEADER, DELIMITER ',')"
+    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//target//"' (HEADER, DELIMITER ',')"
 #endif
     call execute_command_line( 'mkdir -p '//dirname(to) )
-    call this%send( "COPY "//trim(table)//" TO '"//trim(to)//"' (HEADER, DELIMITER ',')" )
+    call this%send( "COPY "//trim(table)//" TO '"//target//"' (HEADER, DELIMITER ',')" )
     call duckdb_destroy_result( this%res )
+    if ( do_atomic ) then
+      call execute_command_line( 'mv -f -- '//target//' '//trim(to) )
+    end if
   end subroutine export_table_as_csvfile
 
   pure function dirname ( path )

@@ -219,23 +219,34 @@ contains
   !     POSIX rename(2) is atomic on the same filesystem, so readers
   !     see either the old `to` or the new one — never partial.
   !     Use this whenever concurrent readers of `to` are possible.
+  !
+  !   compression='zstd' | 'snappy' | 'gzip' | 'uncompressed':
+  !     pass-through to DuckDB's COPY ... COMPRESSION option. If
+  !     absent, DuckDB picks its default (snappy as of v1.5). 'zstd'
+  !     gives ~20-30 % smaller files than snappy at similar
+  !     read/write cost — recommended for archive/persisted parquets.
   !-----------------------------------------------------------
-  subroutine export_table_as_parquet ( this, table, to, atomic )
-    class(duckdb_ty),  intent(inout) :: this
-    character(*),      intent(in)    :: table
-    character(*),      intent(in)    :: to
-    logical, optional, intent(in)    :: atomic
-    character(:), allocatable :: target
+  subroutine export_table_as_parquet ( this, table, to, atomic, compression )
+    class(duckdb_ty),       intent(inout) :: this
+    character(*),           intent(in)    :: table
+    character(*),           intent(in)    :: to
+    logical,      optional, intent(in)    :: atomic
+    character(*), optional, intent(in)    :: compression
+    character(:), allocatable :: target, opts
     logical :: do_atomic
     do_atomic = .false.
     if ( present(atomic) ) do_atomic = atomic
     target = trim(to)
     if ( do_atomic ) target = trim(to) // '.tmp'
+    opts = "FORMAT 'parquet'"
+    if ( present(compression) ) then
+      opts = opts // ", COMPRESSION '" // trim(compression) // "'"
+    end if
 #ifdef debug
-    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//target//"' WITH(FORMAT 'parquet')"
+    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//target//"' WITH("//opts//")"
 #endif
     call execute_command_line( 'mkdir -p '//dirname(to) )
-    call this%send( "COPY "//trim(table)//" TO '"//target//"' WITH(FORMAT 'parquet')" )
+    call this%send( "COPY "//trim(table)//" TO '"//target//"' WITH("//opts//")" )
     call duckdb_destroy_result( this%res )
     if ( do_atomic ) then
       call execute_command_line( 'mv -f -- '//target//' '//trim(to) )

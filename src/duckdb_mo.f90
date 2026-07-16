@@ -279,6 +279,9 @@ contains
     call duckdb_destroy_result( this%res )
     if ( do_atomic ) then
       call execute_command_line( 'mv -f -- '//target//' '//trim(to) )
+      ! Publish _SUCCESS marker (Hadoop convention) — see file_mo.f90
+      ! atomic_commit for the canonical pattern.
+      call execute_command_line( 'touch -- "'//dirname(to)//'_SUCCESS"' )
     end if
   end subroutine export_table_as_parquet
 
@@ -304,6 +307,9 @@ contains
     call duckdb_destroy_result( this%res )
     if ( do_atomic ) then
       call execute_command_line( 'mv -f -- '//target//' '//trim(to) )
+      ! Publish _SUCCESS marker (Hadoop convention) — see file_mo.f90
+      ! atomic_commit for the canonical pattern.
+      call execute_command_line( 'touch -- "'//dirname(to)//'_SUCCESS"' )
     end if
   end subroutine export_table_as_csvfile
 
@@ -317,6 +323,59 @@ contains
     else
       dirname = './'
     end if
+  end function
+
+  !========================================================
+  ! best_available — canonical "best available data as of an origin" SELECT builder.
+  !
+  ! Returns the DuckDB SELECT that gives, for each (keys, valid), the row from the
+  ! FRESHEST issuance whose recv <= as_of. Leak-safe by construction and
+  ! GRANULARITY-AGNOSTIC: works whether recv is a precise receive time or a snapped
+  ! 30-min stamp, so consumers stop caring which the producer wrote. Centralises the
+  ! `row_number() OVER (... ORDER BY jst_recv DESC) WHERE rn=1` pattern hand-rolled in
+  ! bias/ensemble/blend/wni/jwa/meteo.
+  !
+  !   source : FROM expression, e.g. "read_parquet('<glob>', union_by_name=true)"
+  !   valid  : valid-time column                         (default 'jst')
+  !   recv   : issuance/receive column                   (default 'jst_recv')
+  !   keys   : extra PARTITION cols before valid, comma-sep, e.g. 'station' (default none)
+  !   as_of  : leak-safe upper cutoff 'YYYY-MM-DD HH:MM:SS'; '' = latest available (live)
+  !   lead_lo, lead_hi : optional fair-lead window in hours; BOTH present => applied
+  !                      (valid - recv BETWEEN lead_lo AND lead_hi hours)
+  !
+  ! Returns a self-contained SELECT (one row per (keys, valid)) ready to wrap in the
+  ! caller's COPY(...) TO or a CTE.
+  pure function best_available ( source, valid, recv, keys, as_of, lead_lo, lead_hi ) result ( sql )
+    character(*), intent(in)           :: source
+    character(*), intent(in), optional :: valid, recv, keys, as_of
+    integer,      intent(in), optional :: lead_lo, lead_hi
+    character(:), allocatable :: sql, v, r, part, where_
+    character(16)             :: lo, hi
+
+    v = 'jst';      if ( present(valid) ) v = trim(valid)
+    r = 'jst_recv'; if ( present(recv)  ) r = trim(recv)
+
+    part = v
+    if ( present(keys) ) then
+      if ( len_trim(keys) > 0 ) part = trim(keys)//', '//v
+    end if
+
+    where_ = ''
+    if ( present(as_of) ) then
+      if ( len_trim(as_of) > 0 ) where_ = r//" <= TIMESTAMP '"//trim(as_of)//"'"
+    end if
+    if ( present(lead_lo) .and. present(lead_hi) ) then
+      write ( lo, '(i0)' ) lead_lo
+      write ( hi, '(i0)' ) lead_hi
+      if ( len(where_) > 0 ) where_ = where_//' AND '
+      where_ = where_//v//' - '//r//' BETWEEN INTERVAL '//trim(lo)// &
+               ' HOUR AND INTERVAL '//trim(hi)//' HOUR'
+    end if
+    if ( len(where_) > 0 ) where_ = ' WHERE '//where_
+
+    sql = 'SELECT * EXCLUDE (_rn) FROM ( SELECT *, row_number() OVER ( PARTITION BY '// &
+          part//' ORDER BY '//r//' DESC ) AS _rn FROM '//trim(source)//where_// &
+          ' ) WHERE _rn = 1'
   end function
 
 end module duckdb_mo

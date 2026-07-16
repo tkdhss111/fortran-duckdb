@@ -340,8 +340,10 @@ contains
   !   recv   : issuance/receive column                   (default 'jst_recv')
   !   keys   : extra PARTITION cols before valid, comma-sep, e.g. 'station' (default none)
   !   as_of  : leak-safe upper cutoff 'YYYY-MM-DD HH:MM:SS'; '' = latest available (live)
-  !   lead_lo, lead_hi : optional fair-lead window in hours; BOTH present => applied
-  !                      (valid - recv BETWEEN lead_lo AND lead_hi hours)
+  !   lead_lo, lead_hi : fair-lead guard in hours. lead_lo alone => MINIMUM lead
+  !                      (valid - recv >= lead_lo h) — excludes nowcasts/hindcasts while
+  !                      KEEPING far-horizon latest-available (right for a live+backfill store).
+  !                      lead_lo AND lead_hi => fixed WINDOW (BETWEEN) — right for fair scoring.
   !
   ! Returns a self-contained SELECT (one row per (keys, valid)) ready to wrap in the
   ! caller's COPY(...) TO or a CTE.
@@ -364,12 +366,16 @@ contains
     if ( present(as_of) ) then
       if ( len_trim(as_of) > 0 ) where_ = r//" <= TIMESTAMP '"//trim(as_of)//"'"
     end if
-    if ( present(lead_lo) .and. present(lead_hi) ) then
+    if ( present(lead_lo) ) then
       write ( lo, '(i0)' ) lead_lo
-      write ( hi, '(i0)' ) lead_hi
       if ( len(where_) > 0 ) where_ = where_//' AND '
-      where_ = where_//v//' - '//r//' BETWEEN INTERVAL '//trim(lo)// &
-               ' HOUR AND INTERVAL '//trim(hi)//' HOUR'
+      if ( present(lead_hi) ) then
+        write ( hi, '(i0)' ) lead_hi
+        where_ = where_//v//' - '//r//' BETWEEN INTERVAL '//trim(lo)// &
+                 ' HOUR AND INTERVAL '//trim(hi)//' HOUR'
+      else
+        where_ = where_//v//' - '//r//' >= INTERVAL '//trim(lo)//' HOUR'
+      end if
     end if
     if ( len(where_) > 0 ) where_ = ' WHERE '//where_
 

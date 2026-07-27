@@ -217,10 +217,17 @@ contains
         if ( is_null ) then
           y = 'NA'
         else
+          ! duckdb_value_string ({ptr,size}, non-deprecated) — NOT the legacy
+          ! duckdb_value_varchar: under libduckdb >= 1.5 the legacy call
+          ! truncates NON-INLINED strings (> 12 bytes, e.g. a 19-char
+          ! 'YYYY-MM-DD HH:MM:SS' timestamp) while short inlined strings read
+          ! fine, which made the bug look data-dependent.
           block
+            type(duckdb_string)       :: ds
             character(:), allocatable :: tmp_str
-            tmp_str = duckdb_value_varchar( this%res, col = j - 1, row = i - 1 )
-            if ( allocated(tmp_str) ) then
+            ds = duckdb_value_string( this%res, col = j - 1, row = i - 1 )
+            if ( ds%size > 0 ) then
+              tmp_str = duckdb_string_to_character( ds )
               y = tmp_str
             else
               y = 'NA'

@@ -3062,7 +3062,10 @@ module duckdb
       res = ""
       if (c_associated(str%data) .and. str%size > 0) then
         call c_f_pointer(str%data, ptrs, [ str%size ])
-        allocate(character(len=str%size) :: res)
+        ! No explicit allocate here: `res = ""` above has already allocated it, so
+        ! ALLOCATE would abort with "allocatable array is already allocated"
+        ! (forrtl severe 151). Assignment to a deferred-length allocatable
+        ! reallocates to the right length on its own.
         res = copy(ptrs)
       end if
     end function duckdb_string_to_character

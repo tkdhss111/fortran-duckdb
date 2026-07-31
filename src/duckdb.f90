@@ -1,3 +1,13 @@
+! DEPRECATED -- no longer used by duckdb_mo.
+!
+! This file was generated against the upstream duckdb.h by a generator that is no longer
+! actively maintained. duckdb_mo.f90 is now self-contained: it declares the handful of C
+! bindings it needs inline, so nothing in this repository uses module `duckdb` any more.
+!
+! It is kept only so that existing consumers which fetch src/duckdb.f90, or which `use
+! duckdb` directly, keep building. Drop it from your fetch list and switch to duckdb_mo;
+! the file will be removed once no consumer references it.
+!
 !
 ! Modified by tkdhss111 @date 2025-07-14
 !

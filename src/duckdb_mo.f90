@@ -1,11 +1,57 @@
 module duckdb_mo
 
-  use duckdb
+  ! Fortran interface to the DuckDB C API, plus the duckdb_ty convenience wrapper.
+  !
+  ! The C bindings used to live in a separate duckdb.f90 generated against the upstream
+  ! duckdb.h. That generator is no longer actively maintained, and only a small part of
+  ! its ~3700 lines was ever reachable from here, so the pieces this module actually
+  ! calls now live inline: five bind(c) types, the state enum, the C interfaces, and the
+  ! thin wrappers that handle C-string conversion. Everything else was unused.
+  !
+  ! Kept deliberately narrow -- add a binding when something here needs it, rather than
+  ! mirroring the whole C API again.
+
+  use, intrinsic :: iso_fortran_env
   use, intrinsic :: iso_c_binding
 
   implicit none
 
   private :: dirname
+  private :: copy, c_f_str_ptr
+
+  ! === DuckDB C API opaque handles ==========================================
+
+  type, bind(c) :: duckdb_database
+    type(c_ptr) :: db = c_null_ptr
+  end type
+
+  type, bind(c) :: duckdb_connection
+    type(c_ptr) :: conn = c_null_ptr
+  end type
+
+  type, bind(c) :: duckdb_config
+    type(c_ptr) :: cnfg = c_null_ptr
+  end type
+
+  type, bind(c) :: duckdb_string
+    type(c_ptr)             :: data = c_null_ptr
+    integer(kind=c_int64_t) :: size = 0
+  end type
+
+  type, bind(c) :: duckdb_result
+    integer(kind=c_int64_t) :: deprecated_column_count = 0
+    integer(kind=c_int64_t) :: deprecated_row_count = 0
+    integer(kind=c_int64_t) :: deprecated_rows_changed = 0
+    type(c_ptr)             :: deprecated_columns = c_null_ptr
+    type(c_ptr)             :: deprecated_error_message = c_null_ptr
+    type(c_ptr)             :: internal_data = c_null_ptr
+  end type
+
+  enum, bind(c)
+    enumerator :: duckdb_state  = 0
+    enumerator :: duckdbsuccess = 0
+    enumerator :: duckdberror   = 1
+  end enum
 
   type duckdb_ty
     type(duckdb_database)     :: db
@@ -25,7 +71,351 @@ module duckdb_mo
     procedure :: export_table_as_csvfile
   end type
 
+  ! === C interfaces =========================================================
+
+  interface
+
+    function c_strlen(str) bind(c, name='strlen')
+      import :: c_ptr, c_size_t
+      type(c_ptr), value :: str
+      integer(c_size_t) :: c_strlen
+    end function c_strlen
+
+    subroutine duckdb_close(database) bind(c, name='duckdb_close')
+      import :: duckdb_database
+      type(duckdb_database) :: database
+    end subroutine duckdb_close
+
+    function duckdb_column_count_(res) &
+    & bind(c, name='duckdb_column_count') result(cc)
+      import :: duckdb_result, c_int64_t
+      type(duckdb_result) :: res
+      integer(kind=c_int64_t) :: cc
+    end function duckdb_column_count_
+
+    function duckdb_connect(database, out_connection) &
+    & bind(c, name='duckdb_connect') result(res)
+      import :: duckdb_state, duckdb_database, duckdb_connection
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_database), value :: database
+      type(duckdb_connection) :: out_connection
+    end function duckdb_connect
+
+    function duckdb_create_config(out_config) &
+    & bind(c, name='duckdb_create_config') result(res)
+      import :: duckdb_state, duckdb_config
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_config) :: out_config
+    end function duckdb_create_config
+
+    subroutine duckdb_destroy_config(config) &
+    & bind(c, name='duckdb_destroy_config')
+      import :: duckdb_config
+      type(duckdb_config) :: config
+    end subroutine duckdb_destroy_config
+
+    subroutine duckdb_destroy_result(res) &
+    & bind(c, name='duckdb_destroy_result')
+      import :: duckdb_result
+      type(duckdb_result) :: res
+    end subroutine duckdb_destroy_result
+
+    subroutine duckdb_disconnect(connection) &
+    & bind(c, name='duckdb_disconnect')
+      import :: duckdb_connection
+      type(duckdb_connection) :: connection
+    end subroutine duckdb_disconnect
+
+    function duckdb_open_ext_(path, db, config, out_error) &
+    & bind(c, name='duckdb_open_ext') result(res)
+      import :: duckdb_state, c_char, duckdb_database, duckdb_config, c_ptr
+      integer(kind(duckdb_state)) :: res
+      character(kind=c_char) :: path
+      type(duckdb_database) :: db
+      type(duckdb_config), value :: config
+      type(c_ptr) :: out_error
+    end function duckdb_open_ext_
+
+    function duckdb_query_(connection, query, out_result) &
+    & bind(c, name='duckdb_query') result(res)
+      import :: duckdb_state, duckdb_connection, duckdb_result, c_char
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_connection), value :: connection
+      character(kind=c_char) :: query ! must be a c string
+      type(duckdb_result) :: out_result
+    end function duckdb_query_
+
+    function duckdb_result_error_(res) &
+    & bind(c, name='duckdb_result_error') result(err)
+      import :: c_ptr, duckdb_result
+      type(duckdb_result) :: res
+      type(c_ptr) :: err
+    end function duckdb_result_error_
+
+    function duckdb_row_count_(res) &
+    & bind(c, name='duckdb_row_count') result(rc)
+      import :: duckdb_result, c_int64_t
+      type(duckdb_result) :: res
+      integer(kind=c_int64_t) :: rc
+    end function duckdb_row_count_
+
+    function duckdb_set_config_(config, name, option) &
+    & bind(c, name='duckdb_set_config') result(res)
+      import :: duckdb_state, duckdb_config, c_char
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_config), value :: config
+      character(c_char) :: name
+      character(c_char) :: option
+    end function duckdb_set_config_
+
+    function duckdb_value_boolean_(res, col, row) &
+    & bind(c, name='duckdb_value_boolean') result(r)
+      import :: duckdb_result, c_bool, c_int64_t
+      type(duckdb_result) :: res
+      integer(kind=c_int64_t), value :: col, row
+      logical(kind=c_bool) :: r
+    end function duckdb_value_boolean_
+
+    function duckdb_value_double_(res, col, row) &
+    & bind(c, name='duckdb_value_double') result(r)
+      import :: duckdb_result, c_double, c_int64_t
+      type(duckdb_result) :: res
+      integer(kind=c_int64_t), value :: col, row
+      real(kind=c_double) :: r
+    end function duckdb_value_double_
+
+    function duckdb_value_float_(res, col, row) &
+    & bind(c, name='duckdb_value_float') result(r)
+      import :: duckdb_result, c_float, c_int64_t
+      type(duckdb_result) :: res
+      integer(kind=c_int64_t), value :: col, row
+      real(kind=c_float) :: r
+    end function duckdb_value_float_
+
+    function duckdb_value_int32_(res, col, row) &
+    & bind(c, name='duckdb_value_int32') result(r)
+      import :: duckdb_result, c_int32_t, c_int64_t
+      type(duckdb_result) :: res
+      integer(kind=c_int64_t), value :: col, row
+      integer(kind=c_int32_t) :: r
+    end function duckdb_value_int32_
+
+    function duckdb_value_int64_(res, col, row) &
+    & bind(c, name='duckdb_value_int64') result(r)
+      import :: duckdb_result, c_int64_t
+      type(duckdb_result) :: res
+      integer(kind=c_int64_t), value :: col, row
+      integer(kind=c_int64_t) :: r
+    end function duckdb_value_int64_
+
+    function duckdb_value_is_null_(res, col, row) &
+    & bind(c, name='duckdb_value_is_null') result(r)
+      import :: duckdb_result, c_bool, c_int64_t
+      type(duckdb_result), intent(in) :: res
+      integer(kind=c_int64_t), value :: col, row
+      logical(kind=c_bool) :: r
+    end function duckdb_value_is_null_
+
+    function duckdb_value_string_(res, col, row) &
+    & bind(c, name='duckdb_value_string') result(r)
+      import :: duckdb_result, c_int64_t, duckdb_string
+      type(duckdb_result), intent(in) :: res
+      integer(kind=c_int64_t), value :: col, row
+      type(duckdb_string) :: r
+    end function duckdb_value_string_
+
+    function duckdb_value_varchar_(res, col, row) &
+    & bind(c, name='duckdb_value_varchar') result(ptr)
+      import :: duckdb_result, c_int64_t, c_ptr
+      type(duckdb_result) :: res
+      integer(kind=c_int64_t), value :: col, row
+      type(c_ptr) :: ptr
+    end function duckdb_value_varchar_
+
+  end interface
+
 contains
+
+  ! === helpers and C-string plumbing ========================================
+
+    subroutine c_f_str_ptr(c_str, f_str)
+        type(c_ptr) :: c_str
+        character(len=:), allocatable :: f_str
+        character(kind=c_char), pointer :: ptrs(:)
+        integer(kind=c_size_t) :: sz
+        if (.not. c_associated(c_str)) return
+        sz = c_strlen(c_str)
+        if (sz < 0) return
+        call c_f_pointer(c_str, ptrs, [ sz ])
+        if ( allocated ( f_str ) ) deallocate ( f_str ) ! added by tkdhss111
+        allocate (character(len=sz) :: f_str)
+        f_str = copy(ptrs)
+    end subroutine c_f_str_ptr
+
+    pure function copy(a)
+      character, intent(in)  :: a(:)
+      character(len=size(a)) :: copy
+      integer :: i
+      do i = 1, size(a)
+        copy(i:i) = a(i)
+      end do
+    end function copy
+
+    function duckdb_column_count(res) result(cc)
+      type(duckdb_result) :: res
+      integer(kind=int64) :: cc
+      cc = 0
+      if (c_associated(res%internal_data)) &
+        cc = int(duckdb_column_count_(res))
+    end function duckdb_column_count
+
+    function duckdb_open_ext(path, out_database, config, out_error) result(res)
+      integer(kind(duckdb_state)) :: res
+      character(len=*) :: path
+      type(duckdb_database) :: out_database
+      type(duckdb_config) :: config
+      type(c_ptr) :: tmp_error
+      character(len=:), allocatable :: out_error
+      tmp_error = c_null_ptr
+      res = duckdb_open_ext_(path//c_null_char, out_database, config, tmp_error)
+      if (c_associated(tmp_error)) then
+        call c_f_str_ptr(tmp_error, out_error)
+      endif
+    end function duckdb_open_ext
+
+    function duckdb_query(connection, query, out_result) result(res)
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_connection), value :: connection
+      character(len=*) :: query
+      character(len=:), allocatable :: sql
+      type(duckdb_result), optional :: out_result
+      sql = query // c_null_char ! convert to c string
+      res = duckdb_query_(connection, sql, out_result)
+      deallocate(sql)
+    end function duckdb_query
+
+    function duckdb_result_error(res) result(err)
+      character(len=:), allocatable :: err
+      type(c_ptr) :: tmp
+      type(duckdb_result) :: res
+      err = ""
+      if (c_associated(res%internal_data)) then
+        tmp = duckdb_result_error_(res)
+        if (c_associated(tmp)) call c_f_str_ptr(tmp, err)
+      end if
+    end function duckdb_result_error
+
+    function duckdb_row_count(res) result(rc)
+      type(duckdb_result) :: res
+      integer(kind=int64) :: rc
+      rc = 0
+      if (c_associated(res%internal_data)) &
+        rc = int(duckdb_row_count_(res))
+    end function duckdb_row_count
+
+    function duckdb_set_config(config, name, option) result(res)
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_config) :: config
+      character(len=*) :: name
+      character(len=*) :: option
+      res = duckdb_set_config_(config, name//c_null_char, option//c_null_char)
+    end function duckdb_set_config
+
+    function duckdb_string_to_character(str) result(res)
+      type(duckdb_string) :: str
+      character(len=:), allocatable :: res
+      character(kind=c_char), pointer :: ptrs(:)
+      res = ""
+      if (c_associated(str%data) .and. str%size > 0) then
+        call c_f_pointer(str%data, ptrs, [ str%size ])
+        ! No explicit allocate here: `res = ""` above has already allocated it, so
+        ! ALLOCATE would abort with "allocatable array is already allocated"
+        ! (forrtl severe 151). Assignment to a deferred-length allocatable
+        ! reallocates to the right length on its own.
+        res = copy(ptrs)
+      end if
+    end function duckdb_string_to_character
+
+    function duckdb_value_boolean(res, col, row) result(r)
+      type(duckdb_result) :: res
+      integer(kind=int64), value :: col, row
+      logical :: r
+      r = .false.
+      if (c_associated(res%internal_data)) &
+        r = duckdb_value_boolean_(res, int(col, kind=c_int64_t), &
+        & int(row, kind=c_int64_t))
+    end function duckdb_value_boolean
+
+    function duckdb_value_double(res, col, row) result(r)
+      type(duckdb_result) :: res
+      integer(kind=int64) :: col, row
+      real(kind=real64) :: r
+      if (c_associated(res%internal_data)) &
+        r = real(duckdb_value_double_(res, int(col, kind=c_int64_t), &
+        & int(row, kind=c_int64_t)), kind=real64)
+    end function duckdb_value_double
+
+    function duckdb_value_float(res, col, row) result(r)
+      type(duckdb_result) :: res
+      integer(kind=int64) :: col, row
+      real(kind=real32) :: r
+      if (c_associated(res%internal_data)) &
+        r = real(duckdb_value_float_(res, int(col, kind=c_int64_t), &
+        & int(row, kind=c_int64_t)), kind=real32)
+    end function duckdb_value_float
+
+    function duckdb_value_int32(res, col, row) result(r)
+      type(duckdb_result) :: res
+      integer(kind=int64) :: col, row
+      integer(kind=int32) :: r
+      r = 0
+      if (c_associated(res%internal_data)) &
+        r = int(duckdb_value_int32_(res, int(col, kind=c_int64_t), &
+        & int(row, kind=c_int64_t)), kind=int32)
+    end function duckdb_value_int32
+
+    function duckdb_value_int64(res, col, row) result(r)
+      type(duckdb_result) :: res
+      integer(kind=int64) :: col, row
+      integer(kind=int64) :: r
+      r = 0
+      if (c_associated(res%internal_data)) &
+        r = int(duckdb_value_int64_(res, int(col, kind=c_int64_t), &
+        & int(row, kind=c_int64_t)), kind=int64)
+    end function duckdb_value_int64
+
+    function duckdb_value_is_null(res, col, row) result(r)
+      type(duckdb_result), intent(in) :: res
+      integer(kind=int64) :: col, row
+      logical :: r
+      r = .false.
+      if (c_associated(res%internal_data)) &
+        r = logical(duckdb_value_is_null_(res, int(col, kind=c_int64_t), &
+        & int(row, kind=c_int64_t)))
+    end function duckdb_value_is_null
+
+    function duckdb_value_string(res, col, row) result(r)
+      type(duckdb_result), intent(in) :: res
+      integer(kind=int64) :: col, row
+      type(duckdb_string) :: r
+      if (c_associated(res%internal_data)) &
+        r = duckdb_value_string_(res, int(col, kind=c_int64_t), &
+        & int(row, kind=c_int64_t))
+    end function duckdb_value_string
+
+    function duckdb_value_varchar(res, col, row) result(str)
+      type(duckdb_result) :: res
+      integer(kind=int64) :: col, row
+      type(c_ptr) :: tmp
+      character(len=:), allocatable :: str
+      tmp = c_null_ptr
+      if (c_associated(res%internal_data)) &
+        tmp = duckdb_value_varchar_(res, int(col, kind=c_int64_t), &
+        & int(row, kind=c_int64_t))
+      if (c_associated(tmp)) call c_f_str_ptr(tmp, str)
+    end function duckdb_value_varchar
+
+  ! === duckdb_ty ============================================================
 
   subroutine open_duckdb ( this, path, access, memory_limit, temp_directory )
     class(duckdb_ty),       intent(inout) :: this

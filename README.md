@@ -29,8 +29,8 @@ needed — no compiler toolchain.
 
 | module | purpose |
 |---|---|
-| `duckdb.f90` | generated binding to the DuckDB C API |
-| `duckdb_mo.f90` | `duckdb_ty` — connection, queries, table/cell access, parquet + CSV export |
+| `duckdb_mo.f90` | `duckdb_ty` — connection, queries, table/cell access, parquet + CSV export. Self-contained: declares the C bindings it needs inline |
+| `duckdb.f90` | **deprecated** — the old generated full-API binding. Nothing here uses it; kept only so existing consumers keep building |
 | `ducklake_mo.f90` | `ducklake_ty` — DuckLake lifecycle: attach, fan-in commit, publish, merge, reclaim |
 
 `ducklake_mo` is optional; vendor it only if you use DuckLake. It depends on `duckdb_mo`

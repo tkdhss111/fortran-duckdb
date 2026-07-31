@@ -1,9 +1,11 @@
+# Symlink the DuckDB headers + shared library into /usr/lib so builds find them without
+# LD_LIBRARY_PATH. Paths are derived from this makefile's own location, not hardcoded.
+DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
 link:
-	ln -s /home/hss/2_tools/fortran-duckdb/libduckdb-linux-amd64/duckdb.h /usr/lib/duckdb.h
-	ln -s /home/hss/2_tools/fortran-duckdb/libduckdb-linux-amd64/duckdb.hpp /usr/lib/duckdb.hpp
-	ln -s /home/hss/2_tools/fortran-duckdb/libduckdb-linux-amd64/libduckdb.so /usr/lib/libduckdb.so
+	ln -sf $(DIR)/duckdb.h   /usr/lib/duckdb.h
+	ln -sf $(DIR)/duckdb.hpp /usr/lib/duckdb.hpp
+	ln -sf $(DIR)/libduckdb.so /usr/lib/libduckdb.so
 
 unlink:
-	unlink /usr/lib/duckdb.h
-	unlink /usr/lib/duckdb.hpp
-	unlink /usr/lib/libduckdb.so
+	rm -f /usr/lib/duckdb.h /usr/lib/duckdb.hpp /usr/lib/libduckdb.so

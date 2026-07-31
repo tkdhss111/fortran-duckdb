@@ -1,3 +1,16 @@
 build
 .Rhistory
 tags
+
+# DuckDB library + CLI: fetched by install_duckdb.sh, deliberately not tracked.
+# Platform-specific and ~200 MB; tracking them bloats history on every upgrade and
+# approaches GitHub's 100 MB per-file limit.
+libduckdb-*/duckdb
+libduckdb-*/duckdb.exe
+libduckdb-*/duckdb.h
+libduckdb-*/duckdb.hpp
+libduckdb-*/libduckdb.so*
+libduckdb-*/libduckdb*.a
+libduckdb-*/libduckdb*.dylib
+libduckdb-*/duckdb.dll
+libduckdb-*/duckdb.lib

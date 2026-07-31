@@ -14,3 +14,8 @@ libduckdb-*/libduckdb*.a
 libduckdb-*/libduckdb*.dylib
 libduckdb-*/duckdb.dll
 libduckdb-*/duckdb.lib
+
+# Working copy left by an old clone-and-build workflow. It is a bare directory, not a
+# submodule (no .gitmodules), so committing it produces a gitlink that clones cannot
+# resolve. Ignore it so `git add -A` cannot pick it up again.
+duckdb/

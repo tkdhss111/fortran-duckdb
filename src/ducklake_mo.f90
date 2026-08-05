@@ -142,20 +142,43 @@ contains
 
   ! read_only attaches the PUBLISHED copy; anything else attaches the live catalog. A
   ! consumer must never attach the live catalog, or it will block the producer.
-  subroutine attach ( this, db, read_only )
+  !
+  ! MIGRATE upgrades a catalog written by an older DuckLake to the format the loaded
+  ! extension requires. Without it, attaching a catalog older than the extension fails with
+  !
+  !     Invalid Input Error: DuckLake catalog version mismatch: catalog version is 0.3,
+  !     but the extension requires version 1.0.
+  !
+  ! and, because callers treat a failed attach as "skip this cycle" rather than a crash, the
+  ! store then goes stale in silence: the producer keeps reporting success while nothing is
+  ! written. A catalog that outlives an extension upgrade hits this, so any long-lived store
+  ! eventually needs it.
+  !
+  ! It is OPT-IN, and deliberately not the default. Migration rewrites the catalog in place
+  ! and is one-way: once upgraded, a process still linked against the older extension can no
+  ! longer attach it. Turning it on silently for every caller would push that breakage onto
+  ! whichever process happened to attach last. Migrating is a decision about the whole set of
+  ! readers and writers, so the caller has to make it.
+  !
+  ! Ignored when read_only, since migration writes and the published copy is opened read-only;
+  ! publish() propagates the upgraded catalog to consumers on the next cycle anyway.
+  subroutine attach ( this, db, read_only, migrate )
     class(ducklake_ty), intent(inout) :: this
     class(duckdb_ty),   intent(inout) :: db
     logical, optional,  intent(in)    :: read_only
+    logical, optional,  intent(in)    :: migrate
     character(:), allocatable         :: path, opts
-    logical                           :: ro
-    ro = .false.
-    if ( present( read_only ) ) ro = read_only
+    logical                           :: ro, mig
+    ro = .false. ; mig = .false.
+    if ( present( read_only ) ) ro  = read_only
+    if ( present( migrate )   ) mig = migrate
     if ( ro ) then
       path = this%published
       opts = ", READ_ONLY"
     else
       path = this%catalog
       opts = ""
+      if ( mig ) opts = ", AUTOMATIC_MIGRATION TRUE"
     end if
     call db%send( "INSTALL ducklake" )       ; call db%clear_result( )
     call db%send( "LOAD ducklake" )          ; call db%clear_result( )

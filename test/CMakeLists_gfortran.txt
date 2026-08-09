@@ -1,6 +1,5 @@
 set ( EXE unit_test )
 set ( SRCS
-  ../src/duckdb.f90
   ../src/duckdb_mo.f90
   ./unit_test.f90
   )

@@ -18,6 +18,8 @@ module duckdb_mo
 
   private :: dirname
   private :: copy, c_f_str_ptr
+  private :: duckdb_appender_create_, duckdb_appender_error_
+  private :: duckdb_append_float_, duckdb_append_varchar_
 
   ! === DuckDB C API opaque handles ==========================================
 
@@ -52,6 +54,15 @@ module duckdb_mo
     enumerator :: duckdbsuccess = 0
     enumerator :: duckdberror   = 1
   end enum
+
+  ! === appender ==============================================================
+  ! 一括 INSERT 用の appender ハンドル。行単位の INSERT より桁違いに速いため、
+  ! 観測データの取り込みはこちらを使う。以前は duckdb.f90 側にあった。
+  ! The appender handle: bulk row insertion, far faster than per-row INSERT.
+
+  type, bind(c) :: duckdb_appender
+    type(c_ptr) :: appn = c_null_ptr
+  end type
 
   type duckdb_ty
     type(duckdb_database)     :: db
@@ -231,6 +242,77 @@ module duckdb_mo
       integer(kind=c_int64_t), value :: col, row
       type(c_ptr) :: ptr
     end function duckdb_value_varchar_
+
+
+    ! === appender C interfaces ==============================================
+
+    function duckdb_appender_create_(connection, schema, table, out_appender) &
+      & bind(c, name='duckdb_appender_create') result(res)
+      import :: duckdb_state, duckdb_connection, duckdb_appender, c_char
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_connection), value :: connection
+      character(kind=c_char) :: schema(*)
+      character(kind=c_char) :: table(*)
+      type(duckdb_appender) :: out_appender
+    end function duckdb_appender_create_
+
+    function duckdb_appender_error_(appender) &
+      & bind(c, name='duckdb_appender_error') result(err)
+      import :: c_ptr, duckdb_appender
+      type(duckdb_appender), value :: appender
+      type(c_ptr) :: err
+    end function duckdb_appender_error_
+
+    function duckdb_appender_flush(appender) &
+      & bind(c, name='duckdb_appender_flush') result(res)
+      import :: duckdb_state, duckdb_appender
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_appender), value :: appender
+    end function duckdb_appender_flush
+
+    function duckdb_appender_close(appender) &
+      & bind(c, name='duckdb_appender_close') result(res)
+      import :: duckdb_state, duckdb_appender
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_appender), value :: appender
+    end function duckdb_appender_close
+
+    function duckdb_appender_destroy(appender) &
+      & bind(c, name='duckdb_appender_destroy') result(res)
+      import :: duckdb_state, duckdb_appender
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_appender) :: appender
+    end function duckdb_appender_destroy
+
+    function duckdb_appender_end_row(appender) &
+      & bind(c, name='duckdb_appender_end_row') result(res)
+      import :: duckdb_state, duckdb_appender
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_appender), value :: appender
+    end function duckdb_appender_end_row
+
+    function duckdb_append_float_(appender, val) &
+      & bind(c, name='duckdb_append_float') result(res)
+      import :: duckdb_state, duckdb_appender, c_float
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_appender), value :: appender
+      real(kind=c_float), value :: val
+    end function duckdb_append_float_
+
+    function duckdb_append_varchar_(appender, val) &
+      & bind(c, name='duckdb_append_varchar') result(res)
+      import :: duckdb_state, duckdb_appender, c_char
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_appender), value :: appender
+      character(kind=c_char) :: val(*)
+    end function duckdb_append_varchar_
+
+    function duckdb_append_null(appender) &
+      & bind(c, name='duckdb_append_null') result(res)
+      import :: duckdb_state, duckdb_appender
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_appender), value :: appender
+    end function duckdb_append_null
 
   end interface
 
@@ -780,5 +862,47 @@ contains
           part//' ORDER BY '//r//' DESC ) AS _rn FROM '//trim(source)//where_// &
           ' ) WHERE _rn = 1'
   end function
+
+
+  ! === appender wrappers (C 文字列変換を隠す) =================================
+
+  function duckdb_appender_create(conn, schema, table, out_app) result(res)
+    integer(kind(duckdb_state)) :: res
+    type(duckdb_connection) :: conn
+    character(len=*) :: schema
+    character(len=*) :: table
+    type(duckdb_appender) :: out_app
+    res = duckdb_appender_create_(conn, trim(schema)//c_null_char, &
+      trim(table)//c_null_char, out_app)
+  end function duckdb_appender_create
+
+  function duckdb_appender_error(appender) result(err)
+    character(len=:), allocatable :: err
+    type(c_ptr) :: tmp
+    type(duckdb_appender) :: appender
+    err = ""
+    if (c_associated(appender%appn)) then
+      tmp = duckdb_appender_error_(appender)
+      if (c_associated(tmp)) call c_f_str_ptr(tmp, err)
+    end if
+  end function duckdb_appender_error
+
+  function duckdb_append_float(appender, value) result(res)
+    integer(kind(duckdb_state)) :: res
+    type(duckdb_appender) :: appender
+    real(kind=real32) :: value
+    res = duckdb_append_float_(appender, real(value, kind=c_float))
+  end function duckdb_append_float
+
+  function duckdb_append_varchar(appender, val) result(res)
+    integer(kind(duckdb_state)) :: res
+    type(duckdb_appender) :: appender
+    character(len=*) :: val
+    character(len=:), allocatable :: cval
+    cval = val // c_null_char
+    res = duckdberror
+    if (c_associated(appender%appn)) &
+      res = duckdb_append_varchar_(appender, cval)
+  end function duckdb_append_varchar
 
 end module duckdb_mo

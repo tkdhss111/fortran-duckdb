@@ -19,3 +19,8 @@ libduckdb-*/duckdb.lib
 # submodule (no .gitmodules), so committing it produces a gitlink that clones cannot
 # resolve. Ignore it so `git add -A` cannot pick it up again.
 duckdb/
+
+# Compiler build artifacts (module files, objects)
+*.mod
+*.smod
+*.o

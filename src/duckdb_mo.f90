@@ -592,13 +592,24 @@ contains
     character(*),      intent(in)    :: query
     logical, optional, intent(in)    :: print
     call duckdb_destroy_result( this%res )
+    ! Clear any message left by an earlier call BEFORE running this one. A stale errmsg
+    ! is worse than none: a caller that checks stat and then reads errmsg would report
+    ! the cause of some previous failure as the cause of this one.
+    if ( allocated( this%errmsg ) ) deallocate( this%errmsg )
     if ( present( print ) ) then
       if ( print ) write ( *, '(a)' ) '[Query] '//trim(query)
     end if
     this%stat = duckdb_query( this%con, trim(query)//";", this%res )
     if ( this%stat == duckdberror ) then
+      ! KEEP the message, do not merely print it. stdout is not something a caller can
+      ! inspect: a program that writes its own post-mortem, retries selectively, or needs
+      ! to distinguish WHICH failure occurred could previously only report "stat = 1",
+      ! because errmsg was declared on the type but assigned in open() alone and so was
+      ! always unallocated after a failed query. Diagnosing such a failure then meant
+      ! correlating against whatever captured stdout, if anything did.
+      this%errmsg = duckdb_result_error( this%res )
       if ( .not. present( print ) ) write ( *, '(a)' ) '[Query] '//trim(query)
-      write ( *, '(a)' ) '[Query] '//trim(duckdb_result_error( this%res ) )
+      write ( *, '(a)' ) '[Query] '//trim(this%errmsg)
       return
     end if
   end subroutine send_query

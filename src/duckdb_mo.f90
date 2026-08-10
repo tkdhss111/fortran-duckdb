@@ -519,23 +519,23 @@ contains
     end if
     if ( duckdb_create_config( this%cf ) == duckdberror ) then
       print *, 'Database: '//trim(path)
-      error stop '*** Error: Cound not create database config'
+      error stop '*** Error: Could not create database config'
     end if
     if ( duckdb_set_config( this%cf, 'access_mode', access_ ) == duckdberror ) then
       call duckdb_destroy_config( this%cf  )
       print *, 'Database: '//trim(path)
-      error stop '*** Error: Cound not set access_mode as '//trim(access_)
+      error stop '*** Error: Could not set access_mode as '//trim(access_)
     end if
     if ( duckdb_open_ext( path, this%db, this%cf, this%errmsg ) == duckdberror ) then
       call duckdb_destroy_config( this%cf  )
       print *, 'Database: '//trim(path)
-      error stop '*** Error: Cound not open database ('//trim(this%errmsg)//')'
+      error stop '*** Error: Could not open database ('//trim(this%errmsg)//')'
     end if
     if ( duckdb_connect( this%db, this%con ) == duckdberror ) then
       call duckdb_destroy_config( this%cf )
       call duckdb_close( this%db  )
       print *, 'Database: '//trim(path)
-      error stop '*** Error: Cound not connect database'
+      error stop '*** Error: Could not connect database'
     end if
 
     ! Resolve memory_limit: explicit arg > env DUCKDB_MEMORY_LIMIT > none
@@ -761,9 +761,9 @@ contains
     if ( present(compression) ) then
       opts = opts // ", COMPRESSION '" // trim(compression) // "'"
     end if
-#ifdef debug
-    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//target//"' WITH("//opts//")"
-#endif
+    ! (a #ifdef debug echo of this statement used to sit here. The file is .f90 and is not
+    !  compiled with -fpp, so the guards were inert and the echo fired in EVERY build —
+    !  a library writing to stdout unbidden. Use send(..., print=.true.) if you want it.)
     call execute_command_line( 'mkdir -p '//dirname(to) )
     call this%send( "COPY "//trim(table)//" TO '"//target//"' WITH("//opts//")" )
     call duckdb_destroy_result( this%res )
@@ -789,9 +789,9 @@ contains
     if ( present(atomic) ) do_atomic = atomic
     target = trim(to)
     if ( do_atomic ) target = trim(to) // '.tmp'
-#ifdef debug
-    write ( *, '(a)' ) "COPY "//trim(table)//" TO '"//target//"' (HEADER, DELIMITER ',')"
-#endif
+    ! (a #ifdef debug echo of this statement used to sit here. The file is .f90 and is not
+    !  compiled with -fpp, so the guards were inert and the echo fired in EVERY build —
+    !  a library writing to stdout unbidden. Use send(..., print=.true.) if you want it.)
     call execute_command_line( 'mkdir -p '//dirname(to) )
     call this%send( "COPY "//trim(table)//" TO '"//target//"' (HEADER, DELIMITER ',')" )
     call duckdb_destroy_result( this%res )

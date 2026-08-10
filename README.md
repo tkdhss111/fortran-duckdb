@@ -36,6 +36,40 @@ needed — no compiler toolchain.
 and `iso_c_binding`, nothing else. Requires DuckDB >= 1.x, since the DuckLake extension
 does not exist for older releases.
 
+## Error handling
+
+Every query goes through `send`, and the outcome is on the type:
+
+| member | after a query |
+|---|---|
+| `stat` | `0` on success, non-zero on failure |
+| `errmsg` | the DuckDB error text on failure; **deallocated** on success |
+
+```fortran
+type(duckdb_ty) :: db
+call db%open( '' )                       ! '' = in-memory
+call db%send( "SELECT 1" )
+if ( db%stat /= 0 ) then
+  write(*,'(a)') 'query failed: '//trim( db%errmsg )   ! e.g. "Catalog Error: Table ..."
+end if
+call db%clear_result( )
+call db%close( )
+```
+
+`errmsg` is cleared at the start of every `send`, so it always describes the **most
+recent** call — testing `stat` first and only then reading `errmsg` is the safe order.
+Check `allocated( db%errmsg )` if you want to be defensive; it is unallocated whenever
+the last query succeeded.
+
+The message is also written to stdout when a query fails. That is convenient in a
+terminal, but stdout is not something a program can inspect: if you are writing your own
+log, retrying selectively, or deciding *which* failure occurred, read `errmsg` — do not
+try to scrape it back out of your console.
+
+> **Note.** `open` is not forgiving in the same way: a failure to create the config, set
+> the access mode, or open the database is an `error stop`, which ends the caller's
+> program. Only query errors are returned via `stat`/`errmsg`.
+
 ## A note on `duckdb.f90`
 
 Earlier versions vendored `duckdb.f90`, a ~3700-line binding generated against the whole

@@ -86,11 +86,11 @@ module ducklake_mo
     character(:), allocatable :: published      ! published copy (consumers, READ_ONLY)
     character(:), allocatable :: data_path      ! directory holding the parquet data files
     integer                   :: stat = 0       ! non-zero after a failed operation
-    integer                   :: lock_unit = 0  ! unit of the held lock file; valid only when locked
-    logical                   :: locked = .false.! NOTE: newunit= returns a NEGATIVE unit, so a
-                                                 ! negative lock_unit cannot mean "unlocked"
+    integer(c_int)            :: lock_fd = -1   ! fd holding the kernel lock; -1 when unlocked
+    logical                   :: locked = .false.
 
     character(:), allocatable :: lock_file
+
   contains
     procedure :: init
     procedure :: attach
@@ -102,6 +102,42 @@ module ducklake_mo
     procedure :: lock
     procedure :: unlock
   end type
+
+
+  ! flock(2) via C. The lock belongs to the KERNEL and to the open file description, so it is
+  ! released the instant the holder goes away -- normal exit, error stop, SIGKILL, OOM kill,
+  ! container teardown, host reset. That is the entire point. An exclusive-create lock file
+  ! cannot do this: nothing runs after SIGKILL to remove it, so the lock outlives its owner
+  ! and every later writer is refused forever.
+  !
+  ! Linux/x86_64 values. Stable ABI rather than implementation detail, spelled out here
+  ! because Fortran cannot include the C headers that define them.
+  interface
+    function c_open ( path, flags, mode ) bind(C, name = 'open') result ( fd )
+      import :: c_int, c_char
+      character(kind=c_char), intent(in) :: path(*)
+      integer(c_int), value              :: flags, mode
+      integer(c_int)                     :: fd
+    end function c_open
+    function c_flock ( fd, operation ) bind(C, name = 'flock') result ( r )
+      import :: c_int
+      integer(c_int), value :: fd, operation
+      integer(c_int)        :: r
+    end function c_flock
+    function c_close ( fd ) bind(C, name = 'close') result ( r )
+      import :: c_int
+      integer(c_int), value :: fd
+      integer(c_int)        :: r
+    end function c_close
+    function c_getpid ( ) bind(C, name = 'getpid') result ( p )
+      import :: c_int
+      integer(c_int) :: p
+    end function c_getpid
+  end interface
+
+  integer(c_int), parameter :: O_RDWR    = 2_c_int,  O_CREAT = 64_c_int
+  integer(c_int), parameter :: LOCK_EX   = 2_c_int,  LOCK_NB = 4_c_int
+  integer(c_int), parameter :: MODE_0644 = 420_c_int
 
   ! POSIX rename(2): atomic when both paths are on one filesystem, which is what makes a
   ! published catalog appear whole to a consumer. Used instead of shelling out to mv so the
@@ -295,26 +331,67 @@ contains
     call db%clear_result( )
   end subroutine reclaim
 
-  ! Advisory single-writer mutex (rule 1). Creation of the lock file is exclusive, so only
-  ! one process succeeds. ok is .false. when another writer holds it -- callers should back
-  ! off and retry rather than proceed. A crash leaves the file behind; remove it manually or
-  ! use an OS-level mutex if unattended recovery matters.
-  subroutine lock ( this, ok )
-    class(ducklake_ty), intent(inout) :: this
-    logical,            intent(out)   :: ok
-    integer                           :: u, ios
-    open ( newunit = u, file = this%lock_file, status = 'new', action = 'write', iostat = ios )
-    ok = ( ios == 0 )
-    this%locked = ok
-    if ( ok ) this%lock_unit = u
-  end subroutine lock
+    ! Advisory single-writer mutex (rule 1). ok is .false. when another writer holds the lock
+    ! -- callers should back off and retry rather than proceed.
+    !
+    ! The mutex is flock(2) on the lock file, NOT the existence of the file. That distinction
+    ! is the whole design:
+    !
+    !   An exclusive-create lock file ( status='new' ) is released only by the code that
+    !   removes it, so a holder that dies without reaching that code -- SIGKILL, OOM kill, a
+    !   start-timeout, a container torn down, the host losing power -- leaves the file behind
+    !   forever. Every later writer is then refused, permanently, while no process anywhere
+    !   holds anything. Recovery needs a human to notice and delete a file, and until then the
+    !   failure is silent: each run reports "another writer holds it" and exits successfully,
+    !   so the store quietly stops advancing while every unit still looks healthy.
+    !
+    !   A kernel lock cannot leak this way. It lives on the open file description, so the
+    !   kernel drops it when the last fd closes -- and process death closes fds no matter what
+    !   killed the process. Nothing has to run in the dying process for the lock to clear.
+    !
+    ! unlock() deliberately LEAVES THE FILE IN PLACE. Do not "tidy up" by deleting it: unlink
+    ! reopens the race this closes. A unlocks and unlinks while B has already opened the same
+    ! path; B locks an unlinked inode while C creates a fresh file and locks that, and both
+    ! believe they are the single writer. A stray empty lock file is not a leak -- its presence
+    ! means nothing, only the kernel lock does.
+    !
+    ! PID is written into the file for humans only. It answers "who holds this?" during an
+    ! incident and is never read back. It is deliberately NOT the mechanism: a PID is
+    ! meaningless across PID namespaces, so a containerised reader testing whether the
+    ! recorded PID is alive would be asking its own namespace about another namespace's
+    ! number, and would either reclaim a live lock or trust a dead one forever.
+    subroutine lock ( this, ok )
+      class(ducklake_ty), intent(inout) :: this
+      logical,            intent(out)   :: ok
+      integer(c_int)                    :: fd, rc
+      integer                           :: u, ios
+      ok = .false.
+      fd = c_open( trim( this%lock_file )//c_null_char, ior( O_RDWR, O_CREAT ), MODE_0644 )
+      if ( fd < 0 ) return                       ! cannot create or open it at all
+      rc = c_flock( fd, ior( LOCK_EX, LOCK_NB ) )
+      if ( rc /= 0 ) then                        ! held elsewhere -- refuse, never block
+        rc = c_close( fd )
+        return
+      end if
+      this%lock_fd = fd
+      this%locked  = .true.
+      ok           = .true.
+      ! Diagnostics only. A failure to write them must not fail the lock -- we hold it.
+      open ( newunit = u, file = this%lock_file, action = 'write', status = 'old', iostat = ios )
+      if ( ios == 0 ) then
+        write ( u, '(a,i0)', iostat = ios ) 'pid ', c_getpid()
+        close ( u )
+      end if
+    end subroutine lock
 
-  subroutine unlock ( this )
-    class(ducklake_ty), intent(inout) :: this
-    if ( .not. this%locked ) return
-    close ( this%lock_unit, status = 'delete' )
-    this%locked = .false.
-  end subroutine unlock
+    subroutine unlock ( this )
+      class(ducklake_ty), intent(inout) :: this
+      integer(c_int) :: rc
+      if ( .not. this%locked ) return
+      rc = c_close( this%lock_fd )   ! releases the kernel lock; the file stays, on purpose
+      this%lock_fd = -1
+      this%locked  = .false.
+    end subroutine unlock
 
   subroutine delete_file ( path )
     character(*), intent(in) :: path

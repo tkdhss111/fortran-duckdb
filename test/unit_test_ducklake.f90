@@ -102,6 +102,26 @@ program unit_test_ducklake
   call lake%unlock( )
   print *, '  ok'
 
+  ! A holder that is SIGKILLed must not strand the lock. This is the regression test for the
+  ! failure the kernel lock exists to prevent: with an exclusive-create lock file, the file
+  ! outlived its dead owner and every later writer was refused forever, silently.
+  ! Linux-specific (flock/fuser), like the rest of this library's platform assumptions.
+  print *, 'Test: a SIGKILLed holder does not strand the lock'
+  call execute_command_line( 'setsid sh -c "flock '//cat//'.lock sleep 120" ' // &
+                             '</dev/null >/dev/null 2>&1 &', wait = .true. )
+  call execute_command_line( 'sleep 1', wait = .true. )
+  call lake%lock( ok )
+  if ( ok ) then
+    call lake%unlock( )
+    error stop '*** Error: lock should be refused while another process holds it'
+  end if
+  print *, '  ok - refused while the other process holds it'
+  call execute_command_line( 'fuser -k -KILL '//cat//'.lock >/dev/null 2>&1; sleep 1', wait = .true. )
+  call lake%lock( ok )
+  if ( .not. ok ) error stop '*** Error: lock must be reclaimable after the holder was SIGKILLed'
+  call lake%unlock( )
+  print *, '  ok - reclaimed automatically after SIGKILL (no manual cleanup)'
+
   print *, '========================================='
   print *, ' All DuckLake tests passed'
   print *, '========================================='

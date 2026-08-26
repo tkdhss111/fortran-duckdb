@@ -24,3 +24,4 @@ duckdb/
 *.mod
 *.smod
 *.o
+test/lake_tmp/

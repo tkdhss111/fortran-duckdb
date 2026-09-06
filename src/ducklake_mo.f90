@@ -31,6 +31,23 @@ module ducklake_mo
   !      too. A producer and a concurrent merge collide with "Conflicting lock is held".
   !      Use lock()/unlock(), or serialise externally.
   !
+  !      lock() refuses for two reasons that look identical from the outside but need
+  !      OPPOSITE responses: contention (retry; the store is healthy) and an unopenable lock
+  !      file (retrying can never help). Ask for the reason and say which one it was:
+  !
+  !        call lake%lock( ok, reason = why, errmsg = why_text )
+  !        if ( .not. ok ) then
+  !          if ( why == LOCK_HELD ) then
+  !            ! another writer is working -- back off, come back next cycle
+  !          else
+  !            ! configuration or permission fault; log why_text and stop pretending
+  !          end if
+  !        end if
+  !
+  !      Reporting both as one message is how a store goes stale for a day while every log
+  !      line says "another writer holds it" and no such writer exists. Both arguments are
+  !      optional, so the two-argument form stays valid.
+  !
   !   2. COMMIT ONCE. Parallel workers must not each open the catalog. Let them write plain
   !      parquet to a staging directory, then have ONE process call insert_parquet() inside
   !      a single transaction. The cycle then commits atomically or not at all.
@@ -79,6 +96,30 @@ module ducklake_mo
 
   private
   public :: ducklake_ty
+  public :: LOCK_ACQUIRED, LOCK_HELD, LOCK_UNOPENABLE, LOCK_ERROR
+
+  ! Why lock() refused.
+  !
+  ! Reported through lock()'s optional `reason` argument. The two-argument form is unchanged,
+  ! so existing callers keep compiling and behaving exactly as before.
+  !
+  ! The distinction matters because the two common failures need OPPOSITE responses, and a
+  ! caller that cannot tell them apart will pick the wrong one:
+  !
+  !   LOCK_HELD       is transient. Someone really is writing. Back off and retry; the store
+  !                   is fine and will advance on its own.
+  !   LOCK_UNOPENABLE never clears by retrying. The path is wrong, the directory is missing,
+  !                   the filesystem is read-only, or the process lacks permission. Retrying
+  !                   forever looks exactly like LOCK_HELD from the outside, so an operator
+  !                   hunting for the phantom writer never finds one -- while the store stops
+  !                   advancing and every unit still reports success.
+  !
+  ! Reporting both as a bare .false. is what makes that indistinguishable, which is why the
+  ! reason is offered here rather than left to the caller to guess.
+  integer, parameter :: LOCK_ACQUIRED   = 0   ! the caller now holds the lock
+  integer, parameter :: LOCK_HELD       = 1   ! another writer holds it -- back off and retry
+  integer, parameter :: LOCK_UNOPENABLE = 2   ! the lock file could not be opened or created
+  integer, parameter :: LOCK_ERROR      = 3   ! flock(2) failed for some other reason
 
   type ducklake_ty
     character(:), allocatable :: alias          ! schema name the lake is attached as
@@ -133,11 +174,25 @@ module ducklake_mo
       import :: c_int
       integer(c_int) :: p
     end function c_getpid
+    ! errno is a thread-local lvalue, not a plain global: glibc exposes it as a function
+    ! returning its address. Reading it any other way gives another thread's value.
+    function c_errno_location ( ) bind(C, name = '__errno_location') result ( p )
+      import :: c_ptr
+      type(c_ptr) :: p
+    end function c_errno_location
+    function c_strerror ( errnum ) bind(C, name = 'strerror') result ( s )
+      import :: c_int, c_ptr
+      integer(c_int), value :: errnum
+      type(c_ptr)           :: s
+    end function c_strerror
   end interface
 
   integer(c_int), parameter :: O_RDWR    = 2_c_int,  O_CREAT = 64_c_int
   integer(c_int), parameter :: LOCK_EX   = 2_c_int,  LOCK_NB = 4_c_int
   integer(c_int), parameter :: MODE_0644 = 420_c_int
+  ! flock(LOCK_NB) reports "someone else holds it" as EAGAIN (== EWOULDBLOCK on Linux).
+  ! Any other errno from flock is a real fault, not contention, and is reported as such.
+  integer(c_int), parameter :: EAGAIN    = 11_c_int
 
   ! POSIX rename(2): atomic when both paths are on one filesystem, which is what makes a
   ! published catalog appear whole to a consumer. Used instead of shelling out to mv so the
@@ -360,22 +415,43 @@ contains
     ! meaningless across PID namespaces, so a containerised reader testing whether the
     ! recorded PID is alive would be asking its own namespace about another namespace's
     ! number, and would either reclaim a live lock or trust a dead one forever.
-    subroutine lock ( this, ok )
-      class(ducklake_ty), intent(inout) :: this
-      logical,            intent(out)   :: ok
-      integer(c_int)                    :: fd, rc
-      integer                           :: u, ios
+    ! `reason` and `errmsg` are optional and purely diagnostic. Omitting both gives exactly
+    ! the previous behaviour, so this is source-compatible with every existing caller.
+    ! `errmsg` carries the failing call, the path and strerror(errno) -- the three things an
+    ! operator needs and none of which a bare .false. can convey.
+    subroutine lock ( this, ok, reason, errmsg )
+      class(ducklake_ty), intent(inout)   :: this
+      logical,            intent(out)     :: ok
+      integer,      intent(out), optional :: reason
+      character(*), intent(out), optional :: errmsg
+      integer(c_int)                      :: fd, rc, err
+      integer                             :: u, ios
       ok = .false.
+      if ( present( reason ) ) reason = LOCK_ERROR
+      if ( present( errmsg ) ) errmsg = ''
       fd = c_open( trim( this%lock_file )//c_null_char, ior( O_RDWR, O_CREAT ), MODE_0644 )
-      if ( fd < 0 ) return                       ! cannot create or open it at all
+      if ( fd < 0 ) then                         ! cannot create or open it at all
+        err = current_errno( )                   ! read errno BEFORE any other C call
+        if ( present( reason ) ) reason = LOCK_UNOPENABLE
+        if ( present( errmsg ) ) errmsg = 'open ' // trim( this%lock_file ) // ': ' // errno_text( err )
+        return
+      end if
       rc = c_flock( fd, ior( LOCK_EX, LOCK_NB ) )
-      if ( rc /= 0 ) then                        ! held elsewhere -- refuse, never block
-        rc = c_close( fd )
+      if ( rc /= 0 ) then                        ! refuse, never block
+        err = current_errno( )
+        rc  = c_close( fd )
+        if ( err == EAGAIN ) then                ! genuine contention: another writer holds it
+          if ( present( reason ) ) reason = LOCK_HELD
+        else                                     ! not contention -- a real fault
+          if ( present( reason ) ) reason = LOCK_ERROR
+        end if
+        if ( present( errmsg ) ) errmsg = 'flock ' // trim( this%lock_file ) // ': ' // errno_text( err )
         return
       end if
       this%lock_fd = fd
       this%locked  = .true.
       ok           = .true.
+      if ( present( reason ) ) reason = LOCK_ACQUIRED
       ! Diagnostics only. A failure to write them must not fail the lock -- we hold it.
       open ( newunit = u, file = this%lock_file, action = 'write', status = 'old', iostat = ios )
       if ( ios == 0 ) then
@@ -392,6 +468,37 @@ contains
       this%lock_fd = -1
       this%locked  = .false.
     end subroutine unlock
+
+  ! errno right after a failed C call. Must be read before any other C call is made, since
+  ! any of them may overwrite it -- that is why lock() saves it into a local immediately.
+  integer(c_int) function current_errno ( )
+    integer(c_int), pointer :: slot
+    call c_f_pointer( c_errno_location( ), slot )
+    current_errno = slot
+  end function current_errno
+
+  ! strerror(3) text for an errno, with the number kept alongside it. The number matters:
+  ! strerror is locale-dependent, so a log read in one locale and a manual read in another
+  ! still agree on the number.
+  function errno_text ( errnum ) result ( text )
+    integer(c_int), intent(in)      :: errnum
+    character(:), allocatable       :: text
+    character(kind=c_char), pointer :: buf(:)
+    type(c_ptr)                     :: cp
+    character(16)                   :: num
+    integer                         :: i
+    text = ''
+    cp   = c_strerror( errnum )
+    if ( c_associated( cp ) ) then
+      call c_f_pointer( cp, buf, [ 256 ] )
+      do i = 1, 256
+        if ( buf(i) == c_null_char ) exit
+        text = text // buf(i)
+      end do
+    end if
+    write ( num, '(i0)' ) errnum
+    text = text // ' (errno ' // trim( num ) // ')'
+  end function errno_text
 
   subroutine delete_file ( path )
     character(*), intent(in) :: path

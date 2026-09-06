@@ -7,6 +7,8 @@ program unit_test_ducklake
   type(duckdb_ty)   :: db, rdr
   type(ducklake_ty) :: lake
   logical           :: ok, ok2, exists
+  integer           :: why
+  character(256)    :: why_text
   integer(8)        :: nrows, ncols
   integer           :: n_before, n_after
   character(*), parameter :: root  = 'test/lake_tmp'
@@ -22,15 +24,49 @@ program unit_test_ducklake
   call lake%init( cat, dpath )
 
   print *, 'Test: lock is exclusive'
-  call lake%lock( ok )
+  call lake%lock( ok, reason = why )
   if ( .not. ok ) error stop '*** Error: first lock should succeed'
+  if ( why /= LOCK_ACQUIRED ) error stop '*** Error: a granted lock must report LOCK_ACQUIRED'
   block
     type(ducklake_ty) :: other
     call other%init( cat, dpath )
-    call other%lock( ok2 )
+    call other%lock( ok2, reason = why, errmsg = why_text )
     if ( ok2 ) error stop '*** Error: second lock should fail while the first is held'
+    ! Contention must be reported as contention -- never as a fault. Getting this wrong is
+    ! what sends an operator hunting for a phantom writer.
+    if ( why /= LOCK_HELD ) error stop '*** Error: contention must report LOCK_HELD'
+    write ( *, '(a)' ) '    reason: '//trim( why_text )
   end block
-  print *, '  ok - second writer refused'
+  print *, '  ok - second writer refused, and reported as contention'
+
+  ! The case that used to be indistinguishable. Before reason/errmsg existed, an unopenable
+  ! lock file returned exactly the same bare .false. as genuine contention, so a caller
+  ! logged "another writer holds the lake lock" while no writer existed anywhere. Retrying
+  ! could never clear it.
+  print *, 'Test: an unopenable lock file is NOT reported as contention'
+  block
+    type(ducklake_ty) :: broken
+    call broken%init( root//'/no_such_dir/catalog.ducklake', dpath )
+    call broken%lock( ok2, reason = why, errmsg = why_text )
+    if ( ok2 ) error stop '*** Error: lock must fail when its file cannot be created'
+    if ( why == LOCK_HELD ) &
+      error stop '*** Error: an unopenable lock file must NOT be reported as contention'
+    if ( why /= LOCK_UNOPENABLE ) error stop '*** Error: expected LOCK_UNOPENABLE'
+    if ( len_trim( why_text ) == 0 ) error stop '*** Error: errmsg must say why'
+    write ( *, '(a)' ) '    reason: '//trim( why_text )
+  end block
+  print *, '  ok - distinguished from contention, with the reason'
+
+  ! Source compatibility: the two-argument form must still work unchanged, because every
+  ! existing consumer calls it that way and picks the library up from main at image build.
+  print *, 'Test: the two-argument form still compiles and behaves'
+  block
+    type(ducklake_ty) :: legacy
+    call legacy%init( cat, dpath )
+    call legacy%lock( ok2 )
+    if ( ok2 ) error stop '*** Error: two-argument form should still be refused here'
+  end block
+  print *, '  ok - unchanged for existing callers'
 
   print *, 'Test: attach live catalog and create a table'
   call db%open( '' )

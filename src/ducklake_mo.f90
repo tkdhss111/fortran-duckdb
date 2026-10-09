@@ -376,8 +376,12 @@ contains
     keep = 0
     if ( present( retain_seconds ) ) keep = retain_seconds
     write ( buf, '(i0)' ) keep
+    ! now() is TIMESTAMP WITH TIME ZONE: keep it that way. now()::TIMESTAMP gave local wall-clock time
+    ! that ducklake_expire_snapshots then read as UTC, so in a JST container the cutoff landed 9 h
+    ! late and a 24 h retention kept only 15 h (measured 2026-10-09: cutoff 09:34 JST intended,
+    ! 18:36 applied).
     call db%send( "CALL ducklake_expire_snapshots('"//this%alias// &
-                  "', older_than => now()::TIMESTAMP - INTERVAL "//trim(buf)//" SECOND)" )
+                  "', older_than => now() - INTERVAL "//trim(buf)//" SECOND)" )
     if ( db%stat /= 0 ) then       ! was swallowed: a failing expiry left history growing unnoticed
       this%stat = db%stat
       print *, '*** Error: Could not expire snapshots'

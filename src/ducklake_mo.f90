@@ -372,11 +372,16 @@ contains
     integer, optional,  intent(in)    :: retain_seconds   ! snapshot history to keep
     integer                           :: keep
     character(32)                     :: buf
+    this%stat = 0                  ! report THIS call's outcome, not a stale one from an earlier op
     keep = 0
     if ( present( retain_seconds ) ) keep = retain_seconds
     write ( buf, '(i0)' ) keep
     call db%send( "CALL ducklake_expire_snapshots('"//this%alias// &
                   "', older_than => now()::TIMESTAMP - INTERVAL "//trim(buf)//" SECOND)" )
+    if ( db%stat /= 0 ) then       ! was swallowed: a failing expiry left history growing unnoticed
+      this%stat = db%stat
+      print *, '*** Error: Could not expire snapshots'
+    end if
     call db%clear_result( )
     call db%send( "CALL ducklake_cleanup_old_files('"//this%alias//"', cleanup_all => true)" )
     if ( db%stat /= 0 ) then
